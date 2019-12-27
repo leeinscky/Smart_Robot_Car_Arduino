@@ -1,0 +1,512 @@
+#include <Stepper.h>
+#include <LiquidCrystal.h> //申明1602液晶的函数库
+#include <Servo.h>
+#include <IRremote.h>
+const int stepsPerRevolution = 200;
+Stepper myStepper1(stepsPerRevolution,8,9,10,11);
+Stepper myStepper2(stepsPerRevolution,4,5,6,7);
+LiquidCrystal lcd(39,34,35,36,37,38); //4数据口模式连线声明
+int Echo = A0;  // Echo回声脚(P2.0)
+int Trig =A1;  //  Trig 触发脚(P2.1)
+int Distance = 0;
+unsigned long time1;
+int  tonepin=40;//设置控制蜂鸣器的数字6脚
+const int liftInt = 23;  //左红外引脚
+int Sensor_pin = 52;
+const int pengzhuang=29;
+const int rightInt = 27;   //右红外引脚
+int flame=A5;//定义火焰接口为模拟5 接口
+const int red = 2;       //RGB引脚
+const int green =3;
+const int blue =12;
+char c;
+Servo myservo; //超声波转向舵机
+const int centerInt = 25;  //中红外引脚
+int pos;
+char found=false;
+char out=false;
+char sign;
+int trac1 = 44; //从车头方向的最右边开始排序
+int trac2 = 45; 
+int trac3 = 46; 
+int trac4 = 47; 
+int PIN_RECV = 22;
+IRrecv irrecv(PIN_RECV);
+decode_results results;
+ 
+void setup() {
+ Serial.begin(9600);     // 初始化串口
+  //初始化电机驱动IO为输出方式
+  //初始化超声波引脚
+  pinMode(Sensor_pin,INPUT); //设置人体红外接口为输入状态
+  pinMode(Echo, INPUT);    // 定义超声波输入脚
+  pinMode(Trig, OUTPUT);   // 定义超声波输出脚
+  irrecv.enableIRIn();
+  pinMode(tonepin,OUTPUT);//蜂鸣器输出脚
+   pinMode(pengzhuang,INPUT);
+  lcd.begin(16,2);       //初始化1602液晶
+  pinMode(liftInt,INPUT);  //左红外输出脚
+  pinMode(rightInt,INPUT);   //右红外输出脚
+ myStepper1.setSpeed(120);
+  myStepper2.setSpeed(120);
+  pinMode(red,OUTPUT);
+  pinMode(green,OUTPUT);
+  pinMode(blue,OUTPUT);
+  digitalWrite(tonepin,LOW);
+  analogWrite(red,0);
+  analogWrite(green,0);
+  analogWrite(blue,0);//green
+ pinMode(flame,INPUT);//定义flame为输入接口
+pinMode(centerInt,INPUT);  //中红外输出脚
+myservo.attach(13); //定义舵机所用引脚
+myservo.write(90); //初始化舵机角度
+ pinMode(trac1, INPUT);
+  pinMode(trac2, INPUT);
+  pinMode(trac3, INPUT);
+  pinMode(trac4, INPUT);
+}
+
+
+void loop() 
+{/* int val=digitalRead(Sensor_pin); 
+  if(val==1&&out==false)
+  test();
+  
+  else{
+  STOP();
+  out=false;}
+  */
+  if(Serial.available())
+   c=Serial.read();
+   
+    switch(c){
+  case 01:              //1前进
+     {advance(50,50);
+      heat();
+      peng();}
+     break;
+     case 02:           //2后退
+     {back_off(50,50);
+      heat();
+      peng();}
+     break;
+    case 03:            //3左转
+     {turn_L(50);
+      heat();
+      peng();}
+     break;
+     case 04:           //4右转
+     {turn_R(50);
+      heat();
+      peng();}
+     break;
+      case 05:            //5停止
+     {STOP();
+      heat();
+      peng();}
+     break;
+     case 06: 
+  {if (irrecv.decode(&results)) {
+    Serial.println(results.value);
+    irrecv.resume();
+  }
+ switch(results.value){
+  case 16724175 :   //1前进
+  advance (50,50);   
+  break;
+  case 16718055:
+  back_off(50,50);   //2后退
+  break;
+  case 16743045:     //3左转
+  turn_L (50);
+
+  break;
+  case 16716015:   //4右转
+  turn_R(50);
+  break;
+  case 16726215:    //5停止
+  STOP();
+  break;
+  default:
+  STOP();
+  break;
+  
+  
+ }
+ fire();
+ }
+break;
+  case 'c':
+
+  test();
+  timeAccount();
+  break;
+case 'd':
+tracing();
+break;
+
+     default:
+     STOP();
+     break;
+     
+   }
+  
+   
+}
+
+void test(){
+  Distance_test();
+   lcd.home();        //把光标移回左上角，即从头开始输出   
+  lcd.print("Distance: ");       //显示
+  lcd.print(Distance);       //显示距离
+  lcd.print("cm");        //显示
+  if(Distance<=60&&Distance>10){
+    if(digitalRead(liftInt) == LOW&&digitalRead(rightInt) == LOW)  //两红外均测到，直行
+    advance(50,50);
+  if(digitalRead(liftInt) == HIGH&&digitalRead(rightInt) == LOW)  //左红外无右红外有，右转
+       turn_L(50);
+   if(digitalRead(liftInt) == LOW&&digitalRead(rightInt) == HIGH)  //右红外无左红外有，左转
+    turn_R (50);
+   if(digitalRead(liftInt) == HIGH&&digitalRead(rightInt) == HIGH)  //两者皆没有，旋转舵机
+  rotate();
+  }
+  if (Distance<=10){         //距离小于15cm，后退并报警
+   digitalWrite(tonepin,HIGH);
+    back_off (50,50);
+    
+   }
+   
+   if(Distance>60){         //距离大于80cm，停止
+    rotate();
+   }
+   lcd.clear();
+   digitalWrite(tonepin,LOW);
+}
+void rotate()
+{
+  analogWrite(red,205);
+ analogWrite(green,133);
+  analogWrite(blue,63);//brown
+  testSign();
+  if(sign == LOW)
+ {
+  Distance_test();
+   lcd.home();        //把光标移回左上角，即从头开始输出   
+  lcd.print("Distance: ");       //显示
+  lcd.print(Distance);       //显示距离
+  lcd.print("cm");        //显示
+  if(Distance<=60&&Distance>10){
+    if(digitalRead(liftInt) == LOW&&digitalRead(rightInt) == LOW)  //两红外均测到，直行
+    advance(50,50);
+  if(digitalRead(liftInt) == HIGH&&digitalRead(rightInt) == LOW)  //左红外无右红外有，左转
+     turn_L(50);
+   if(digitalRead(liftInt) == LOW&&digitalRead(rightInt) == HIGH)  //右红外无左红外有，右转
+  turn_R (50);
+   if(digitalRead(liftInt) == HIGH&&digitalRead(rightInt) == HIGH)  //两者皆没有，旋转舵机
+  STOP(); 
+  }
+  if (Distance<=10){                   //距离小于10cm，后退并报警
+    sound();
+    back_off (50,50);
+
+   }
+   
+   if(Distance>60){         //距离大于60cm，停止
+    STOP();
+   }
+   lcd.clear();
+}
+  else if(sign == HIGH){
+    for(pos=0;pos<180;pos++){
+      myservo.write(pos);    //给舵机寻找角度
+      delay(50);
+      testSign();
+if( sign == LOW){
+       myservo.write(90);
+       
+       if(pos>=90){
+       do{
+          testSign();
+         tLeft(50,50);
+        } while( sign == HIGH);
+       }
+       else{
+       do{
+          testSign();
+          
+         
+          tRight(50,50);
+       } while( sign == HIGH);
+       }
+     
+   
+  Distance_test();
+   lcd.home();        //把光标移回左上角，即从头开始输出   
+  lcd.print("Distance: ");       //显示
+  lcd.print(Distance);       //显示距离
+  lcd.print("cm");        //显示
+  if(Distance<=60&&Distance>10){
+    if(digitalRead(liftInt) == LOW&&digitalRead(rightInt) == LOW)  //两红外均测到，直行
+    advance(50,50);
+  if(digitalRead(liftInt) == HIGH&&digitalRead(rightInt) == LOW)  //左红外无右红外有，左转
+      turn_L(50);  
+   if(digitalRead(liftInt) == LOW&&digitalRead(rightInt) == HIGH)  //右红外无左红外有，右转
+   turn_R (50);
+   if(digitalRead(liftInt) == HIGH&&digitalRead(rightInt) == HIGH)  //两者皆没有，旋转舵机
+  STOP(); 
+  }
+  if (Distance<=10){                   //距离小于10cm，后退并报警
+    sound();
+    back_off (50,50);
+    
+   }
+   
+   if(Distance>60){         //距离大于60cm，停止
+    STOP();
+   }
+   lcd.clear();
+
+    found=true;
+    break;
+  }
+}
+  }
+   
+if(found==false){
+  out=true;
+}
+}
+void testSign(){
+  sign=digitalRead(centerInt);
+}
+
+void STOP (void)                    //小车停止
+{
+   digitalWrite(red,HIGH);
+  digitalWrite(green,LOW);
+   digitalWrite(blue,LOW);//red
+   
+    myStepper1.setSpeed(0);
+    myStepper2.setSpeed(0);
+    myStepper1.step(0);
+    myStepper2.step(0);    
+}   
+void advance (char a,char b)          //小车前进
+{
+  digitalWrite(red,LOW);
+  digitalWrite(green,LOW);
+  digitalWrite(blue,HIGH);//blue
+
+  for(int i = 0;i<30;i++)
+  {
+    myStepper1.setSpeed(a);
+    myStepper2.setSpeed(b);
+    myStepper1.step(1);
+    myStepper2.step(1);
+  }
+}
+void back_off (char a,char b)          //小车后退
+{
+  digitalWrite(red,HIGH);
+ digitalWrite(green,HIGH);
+  digitalWrite(blue,LOW);//yellow
+
+  for(int i = 0;i<50;i++)
+  {
+    myStepper1.setSpeed(a);
+    myStepper2.setSpeed(b);
+    myStepper1.step(-1);
+    myStepper2.step(-1);
+  }
+}
+void turn_L (char a)             //小车左转
+{
+ digitalWrite(red,LOW);
+digitalWrite(green,HIGH);
+ digitalWrite(blue,LOW);//green
+
+  for(int i = 0;i<50;i++)
+  {
+    myStepper1.setSpeed(a);
+    myStepper2.setSpeed(0);
+    myStepper1.step(1);
+    myStepper2.step(0);
+  }
+}
+void turn_R (char a)             //小车右转
+{
+  digitalWrite(red,LOW);
+ digitalWrite(green,HIGH);
+  digitalWrite(blue,HIGH);//green
+  
+  for(int i = 0;i<50;i++)
+  {
+    myStepper1.setSpeed(0);
+    myStepper2.setSpeed(a);
+    myStepper1.step(0);
+    myStepper2.step(1);
+  }
+}
+
+ void tRight(char a,char b)          //小车原地右转
+{
+
+  
+  for(int i = 0;i<30;i++)
+  {
+    myStepper1.setSpeed(a);
+    myStepper2.setSpeed(b);
+    myStepper1.step(1);
+    myStepper2.step(-1);
+  }
+}
+   void tLeft (char a,char b)          //小车原地左转
+{
+
+ 
+  for(int i = 0;i<30;i++)
+  {
+    myStepper1.setSpeed(a);
+    myStepper2.setSpeed(b);
+    myStepper1.step(-1);
+    myStepper2.step(1);
+  }
+}
+ void Distance_test()   // 量出前方距离 
+{
+  digitalWrite(Trig, LOW);   // 给触发脚低电平2μs
+  delayMicroseconds(2);
+  digitalWrite(Trig, HIGH);  // 给触发脚高电平10μs，这里至少是10μs
+  delayMicroseconds(10);
+  digitalWrite(Trig, LOW);    // 持续给触发脚低电
+  float Fdistance = pulseIn(Echo, HIGH);  // 读取高电平时间(单位：微秒)
+  Fdistance= Fdistance/58;       //为什么除以58等于厘米，  Y米=（X秒*344）/2
+  // X秒=（ 2*Y米）/344 ==》X秒=0.0058*Y米 ==》厘米=微秒/58
+  Serial.print("Distance:");      //输出距离（单位：厘米）
+  Serial.println(Fdistance);         //显示距离
+  Distance = Fdistance;
+}
+ void sound(){
+  
+digitalWrite(tonepin,HIGH); //发声音
+delay(2);
+digitalWrite(tonepin,LOW); //不发声音
+
+}  
+void timeAccount(){
+  time1=millis();
+  lcd.home();  //把光标移回左上角，即从头开始输出  
+  lcd.setCursor(0,2);
+  lcd.print("Time: ");
+  lcd.print(time1/1000);  
+  lcd.print(" s");
+  //delay(1000);
+}
+
+void tracing()
+{
+  int data[4];
+  data[0] = digitalRead(44);
+  data[1] = digitalRead(46);
+  data[2] = digitalRead(47);
+  data[3] = digitalRead(45);
+
+ /* if(data[0]==1&&data[1]==1&& data[2]==1 && data[3]==1)  //左右都没有检测到黑线
+  {
+    advance(50,50);
+  }
+*/
+  if(data[0] ==0||data[1]==0)  //右边检测到黑线
+  {
+   turn_R(50);
+  }
+
+/* if(data[1] ==0)  //右边检测到黑线
+  {
+   turn_R(25);
+  }
+  */
+  if(data[2]==0||data[3]==0)  //左边检测到黑线
+  {
+   turn_L(50);
+  }
+/*if(data[3]==0)  //左边检测到黑线
+  {
+   turn_L(50);
+  }
+  */
+  /*if(data[0]==0&& data[1] ==0&& data[2]==0 && data[3]==0)  //左右都检测到黑线是停止
+  {
+    STOP();
+    //while(1);
+  }
+ */
+ 
+ else
+  advance(50,50);
+  
+}
+void fire(){
+  Serial.println(analogRead(flame));//输出模拟值，并将其打印出来
+  if((analogRead(flame))<=430)  //当模拟值小于等于400 时蜂鸣器鸣响
+{
+  analogWrite(40,1000);
+for (int value = 0 ; value < 255; value=value+10){
+    analogWrite(2, value);
+    delay(5);
+  }
+  delay(500);
+  analogWrite(40,500);
+  for (int value = 255; value >0; value=value-1){
+    analogWrite(2, value);
+  }  
+
+ lcd.home();        //把光标移回左上角，即从头开始输出   
+    lcd.print("ON FIRE!!!   ");       //显示
+    lcd.setCursor(6,2);   //把光标定位在第2行，第6列
+        lcd.print("value:");        //显示
+        lcd.print(analogRead(flame));       //显示数值
+   
+}
+else{
+  analogWrite(40,0);
+  analogWrite(2,0);
+   lcd.home();        //把光标移回左上角，即从头开始输出  
+    lcd.print("You are safe!");       
+     lcd.setCursor(6,2);   //把光标定位在第2行，第6列
+        lcd.print("value:");        //显示
+        lcd.print(analogRead(flame));       //显示数值
+
+   
+}
+}
+
+void heat(){
+ int val=digitalRead(Sensor_pin); //定义参数存储人体红外传感器读到的状态
+
+if(val == 1) //如果检测到有动物运动（在检测范围内），蜂鸣器发出警报
+{ 
+Alarm();
+}
+else
+{
+return;
+}  
+}
+
+void Alarm() //蜂鸣器发出警报
+{
+for(int i=0;i<100;i++){
+digitalWrite(40,HIGH); //发声音
+delay(2);
+digitalWrite(40,LOW); //不发声音
+delay(2); //修改延时时间，改变发声频率
+}
+}
+
+void peng(){
+  if(digitalRead(pengzhuang)==0)
+ digitalWrite(tonepin,HIGH);
+ if(digitalRead(pengzhuang)==1)
+ digitalWrite(tonepin,LOW);
+}
